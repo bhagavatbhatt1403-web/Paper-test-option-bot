@@ -1,0 +1,48 @@
+name: BTC Option Signal Bot
+
+on:
+  schedule:
+    - cron: "5 * * * *"      # every hour at :05 UTC (= :35 IST)
+  workflow_dispatch:          # lets you run it manually from the Actions tab
+
+permissions:
+  contents: write             # lets the bot save state.json (memory of the last signal)
+
+concurrency:
+  group: signal-bot
+  cancel-in-progress: false
+
+jobs:
+  run-bot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+      - run: pip install -r requirements.txt
+      - name: Run bot
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          FORCE_SEND: ${{ github.event_name == 'workflow_dispatch' && '1' || '0' }}
+        run: python main.py
+      - name: Run paper trading bot
+        if: always()
+        env:
+          PAPER_BOT_TOKEN: ${{ secrets.PAPER_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          FORCE_SEND: ${{ github.event_name == 'workflow_dispatch' && '1' || '0' }}
+        run: python paper_bot.py
+      - name: Save bot memory
+        if: always()
+        run: |
+          git config user.name "signal-bot"
+          git config user.email "signal-bot@users.noreply.github.com"
+          for f in state.json signals.json paper_state.json; do
+            if [ -f "$f" ]; then git add "$f"; fi
+          done
+          git diff --cached --quiet || (git commit -m "bot: update state [skip ci]" && git pull --rebase && git push)
+          
